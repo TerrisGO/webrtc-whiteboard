@@ -7,6 +7,10 @@ var stream = require('stream')
 var through = require('through')
 var Tracker = require('webtorrent-tracker')
 
+if(!localStorage.getItem('slide1')) {
+  localStorage.setItem('slide1', JSON.stringify({images:{}}));
+}
+
 // prompt user for their name
 var username
 while (!(username = window.prompt('What is your name?'))) {}
@@ -30,6 +34,7 @@ document.body.appendChild(canvas)
 
 // set canvas settings and size
 setupCanvas()
+checkLocalstorage();
 window.addEventListener('resize', setupCanvas)
 
 function setupCanvas () {
@@ -60,10 +65,35 @@ function setupCanvas () {
   redraw()
 }
 
+// Check if there is data in localStorage
+function checkLocalstorage() {
+  window.onload = function() {
+    var slideData = localStorage.getItem('slide1');
+    if(slideData) {
+      state = JSON.parse(slideData);
+      redraw();
+    }
+  }
+}
+
 function redraw () {
   // clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
+  // Draw images from localStorage
+  if (state.images) {
+    Object.keys(state['images']).forEach(function(hashId) {
+      var imgData = state['images'][hashId]
+      var imgBuffer = new Uint8Array(imgData.buffer.data);
+      bufToImage(imgBuffer, function (img) {
+        ctx.drawImage(
+          img,
+          imgData.pos.x - (imgData.width / 4), imgData.pos.y - (imgData.height / 4),
+          imgData.width / 2, imgData.height / 2
+        )
+      })
+    })
+  }
   // draw the current state
   Object.keys(state).forEach(function (id) {
     var data = state[id]
@@ -78,6 +108,7 @@ function redraw () {
       })
       ctx.stroke()
     }
+
 
     // draw images
     if (data.infoHash) {
@@ -151,26 +182,49 @@ canvas.addEventListener('touchstart', onDown)
 
 function onDown (e) {
   e.preventDefault()
-  currentPathId = hat(80)
   var x = e.clientX || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageX) || 0
   var y = e.clientY || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageY) || 0
-  var p1 = { x: x, y: y }
-  var p2 = {
-    x: x + 0.001,
-    y: y + 0.001
-  } // paint point on click
+  if(e.shiftKey) {
+    // Check if the click is in an image boundary 
+    console.log(x);
+    console.log(y);
+    Object.keys(state.images).forEach(function(imgKey) {
+      var img = state.images[imgKey]
+      var effectiveX = img.pos.x-(img.width / 4);
+      var effectiveY = img.pos.y-(img.height / 4);
+      var inXaxis = x >= effectiveX && x <= effectiveX+(img.width/2)
+      var inYaxis = y >= effectiveY && y <= effectiveY+(img.height/2)
+      if(inXaxis && inYaxis) {
+        state.dragging = imgKey;
+        redraw();
+      }
+    })   
+  } else {
+    currentPathId = hat(80)
+    var p1 = { x: x, y: y }
+    var p2 = {
+      x: x + 0.001,
+      y: y + 0.001
+    } // paint point on click
 
-  state[currentPathId] = { color: color, pts: [ p1, p2 ] }
-  broadcast({ i: currentPathId, pt: p1, color: color })
-  broadcast({ i: currentPathId, pt: p2 })
-  redraw()
+    state[currentPathId] = { color: color, pts: [ p1, p2 ] }
+
+    var slide1 = JSON.parse(localStorage.getItem('slide1'));
+    slide1[currentPathId] = { color: color, pts: [ p1, p2 ] };
+    localStorage.setItem('slide1', JSON.stringify(slide1));
+
+    broadcast({ i: currentPathId, pt: p1, color: color })
+    broadcast({ i: currentPathId, pt: p2 })
+    redraw()
+  }
 }
 
 document.body.addEventListener('mouseup', onUp)
 document.body.addEventListener('touchend', onUp)
 
 function onUp () {
-  currentPathId = null
+  currentPathId = null;
+  state.dragging = null;
 }
 
 canvas.addEventListener('mousemove', onMove)
@@ -179,11 +233,23 @@ canvas.addEventListener('touchmove', onMove)
 function onMove (e) {
   var x = e.clientX || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageX) || 0
   var y = e.clientY || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageY) || 0
-  if (currentPathId) {
-    var pt = { x: x, y: y }
-    state[currentPathId].pts.push(pt)
-    broadcast({ i: currentPathId, pt: pt })
-    redraw()
+  if(e.shiftKey && state.dragging) {
+    var img = state.images[state.dragging];
+    img.pos.x = x;
+    img.pos.y = y;
+    redraw();
+  } else {
+    if (currentPathId) {
+      var pt = { x: x, y: y }
+
+      var slide1 = JSON.parse(localStorage.getItem('slide1'));
+      slide1[currentPathId].pts.push(pt)
+      localStorage.setItem('slide1', JSON.stringify(slide1));
+
+      state[currentPathId].pts.push(pt)
+      broadcast({ i: currentPathId, pt: pt })
+      redraw()
+    }
   }
 }
 
@@ -258,6 +324,7 @@ dragDrop('body', function (files, pos) {
       redraw()
     } else {
       bufToImage(files[0].buffer, function (img) {
+
         var message = {
           img: true,
           infoHash: torrent.infoHash,
@@ -265,6 +332,13 @@ dragDrop('body', function (files, pos) {
           width: img.width,
           height: img.height
         }
+
+        var slide1 = JSON.parse(localStorage.getItem('slide1'));
+        if (!slide1['images']) slide1['images'] = {};
+        message['buffer'] = files[0].buffer;
+        slide1['images'][torrent.infoHash] = message
+        localStorage.setItem('slide1', JSON.stringify(slide1));
+
         broadcast(message)
         state[torrent.infoHash] = message
         torrentData[torrent.infoHash] = { complete: true, img: img }
