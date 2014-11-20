@@ -6,10 +6,8 @@ var once = require('once')
 var stream = require('stream')
 var through = require('through')
 var Tracker = require('webtorrent-tracker')
-
-if(!localStorage.getItem('slide1')) {
-  localStorage.setItem('slide1', JSON.stringify({images:{}}));
-}
+var Board = require('./board');
+var Canvas = require('./canvas');
 
 // prompt user for their name
 var username
@@ -20,12 +18,13 @@ if (!username) username = 'No Name'
 var color = 'rgb(' + hat(8, 10) + ',' + hat(8, 10) + ',' + hat(8, 10) + ')'
 
 var currentPathId = null
-var state = {}
+// var board.currentCanvas.state = {}
+var board = new Board;
 var peers = []
 var peerId = new Buffer(hat(160), 'hex')
 
 var torrentData = {}
-var client = new Client({ peerId: peerId })
+// var client = new Client({ peerId: peerId })
 
 // create canvas
 var canvas = document.createElement('canvas')
@@ -34,7 +33,7 @@ document.body.appendChild(canvas)
 
 // set canvas settings and size
 setupCanvas()
-checkLocalstorage();
+board.loadBoard(redraw);
 window.addEventListener('resize', setupCanvas)
 
 function setupCanvas () {
@@ -62,21 +61,10 @@ function setupCanvas () {
   // set font options
   ctx.fillStyle = 'rgb(255,0,0)'
   ctx.font ='16px sans-serif'
-  redraw()
-}
-
-// Check if there is data in localStorage
-function checkLocalstorage() {
-  window.onload = function() {
-    var slideData = localStorage.getItem('slide1');
-    if(slideData) {
-      state = JSON.parse(slideData);
-      redraw();
-    }
-  }
 }
 
 function redraw () {
+  var state = board.currentCanvas().state
   // clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
@@ -94,10 +82,14 @@ function redraw () {
       })
     })
   }
-  // draw the current state
-  Object.keys(state).forEach(function (id) {
-    var data = state[id]
 
+  console.log("redrawing");
+  // draw the current canvas state
+  Object.keys(state)
+    .filter(function(key) {
+      return key !== 'images' && key !== 'dragging';
+    }).forEach(function (id) {
+    var data = state[id]
     // draw paths
     if (data.pts) {
       ctx.beginPath()
@@ -107,58 +99,6 @@ function redraw () {
         else ctx.lineTo(point.x, point.y)
       })
       ctx.stroke()
-    }
-
-
-    // draw images
-    if (data.infoHash) {
-      if (!torrentData[data.infoHash]) {
-        torrentData[data.infoHash] = { complete: false }
-        client.download({
-          infoHash: data.infoHash,
-          announce: [ 'wss://tracker.webtorrent.io' ]
-        }, function (torrent) {
-          var file = torrent.files[0]
-          if (!file) return
-          if (data.img) {
-            file.createReadStream().pipe(concat(function (buf) {
-              bufToImage(buf, function (img) {
-                torrentData[data.infoHash] = { complete: true, img: img }
-                redraw()
-              })
-            }))
-          } else if (data.video) {
-            torrentData[data.infoHash] = {
-              complete: true,
-              videoStream: file.createReadStream()
-            }
-            redraw()
-          }
-        })
-        ctx.fillStyle = 'rgb(210,210,210)'
-        ctx.fillRect(
-          data.pos.x - (data.width / 4), data.pos.y - (data.height / 4),
-          data.width / 2, data.height / 2
-        )
-      }
-      if (torrentData[data.infoHash].complete) {
-        if (torrentData[data.infoHash].img) {
-          ctx.drawImage(
-            torrentData[data.infoHash].img,
-            data.pos.x - (data.width / 4), data.pos.y - (data.height / 4),
-            data.width / 2, data.height / 2
-          )
-        } else if (torrentData[data.infoHash].videoStream) {
-          if (document.querySelector('#' + 'infoHash_' + data.infoHash)) return
-          var video = document.createElement('video')
-          video.style.left = (data.pos.x - 150) + 'px'
-          video.style.top = (data.pos.y - 100) + 'px'
-          video.id = 'infoHash_' + data.infoHash
-          video.controls = true
-          document.body.appendChild(video)
-          pipeToVideo(torrentData[data.infoHash].videoStream, video)
-        }
-      }
     }
   })
 
@@ -181,21 +121,20 @@ canvas.addEventListener('mousedown', onDown)
 canvas.addEventListener('touchstart', onDown)
 
 function onDown (e) {
+  console.log(board);
   e.preventDefault()
   var x = e.clientX || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageX) || 0
   var y = e.clientY || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageY) || 0
   if(e.shiftKey) {
     // Check if the click is in an image boundary 
-    console.log(x);
-    console.log(y);
-    Object.keys(state.images).forEach(function(imgKey) {
-      var img = state.images[imgKey]
+    Object.keys(board.currentCanvas().state.images).forEach(function(imgKey) {
+      var img = board.currentCanvas().state.images[imgKey]
       var effectiveX = img.pos.x-(img.width / 4);
       var effectiveY = img.pos.y-(img.height / 4);
       var inXaxis = x >= effectiveX && x <= effectiveX+(img.width/2)
       var inYaxis = y >= effectiveY && y <= effectiveY+(img.height/2)
       if(inXaxis && inYaxis) {
-        state.dragging = imgKey;
+        board.currentCanvas().state.dragging = imgKey;
         redraw();
       }
     })   
@@ -207,11 +146,12 @@ function onDown (e) {
       y: y + 0.001
     } // paint point on click
 
-    state[currentPathId] = { color: color, pts: [ p1, p2 ] }
+    board.currentCanvas().state[currentPathId] = { color: color, pts: [ p1, p2 ] }
+    board.currentCanvas().saveState();
 
-    var slide1 = JSON.parse(localStorage.getItem('slide1'));
-    slide1[currentPathId] = { color: color, pts: [ p1, p2 ] };
-    localStorage.setItem('slide1', JSON.stringify(slide1));
+    // var slide1 = JSON.parse(localStorage.getItem('slide1'));
+    // slide1[currentPathId] = { color: color, pts: [ p1, p2 ] };
+    // localStorage.setItem('slide1', JSON.stringify(slide1));
 
     broadcast({ i: currentPathId, pt: p1, color: color })
     broadcast({ i: currentPathId, pt: p2 })
@@ -224,7 +164,7 @@ document.body.addEventListener('touchend', onUp)
 
 function onUp () {
   currentPathId = null;
-  state.dragging = null;
+  board.currentCanvas().state.dragging = null;
 }
 
 canvas.addEventListener('mousemove', onMove)
@@ -233,20 +173,22 @@ canvas.addEventListener('touchmove', onMove)
 function onMove (e) {
   var x = e.clientX || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageX) || 0
   var y = e.clientY || (e.changedTouches && e.changedTouches[0] && e.changedTouches[0].pageY) || 0
-  if(e.shiftKey && state.dragging) {
-    var img = state.images[state.dragging];
+  if(e.shiftKey && board.currentCanvas().state.dragging) {
+    var img = board.currentCanvas().state.images[board.currentCanvas().state.dragging];
     img.pos.x = x;
     img.pos.y = y;
     redraw();
   } else {
     if (currentPathId) {
+      console.log(currentPathId);
       var pt = { x: x, y: y }
 
-      var slide1 = JSON.parse(localStorage.getItem('slide1'));
-      slide1[currentPathId].pts.push(pt)
-      localStorage.setItem('slide1', JSON.stringify(slide1));
+      // var slide1 = JSON.parse(localStorage.getItem('slide1'));
+      // slide1[currentPathId].pts.push(pt)
+      // localStorage.setItem('slide1', JSON.stringify(slide1));
 
-      state[currentPathId].pts.push(pt)
+      board.currentCanvas().state[currentPathId].pts.push(pt)
+      board.currentCanvas().saveState();
       broadcast({ i: currentPathId, pt: pt })
       redraw()
     }
@@ -262,7 +204,7 @@ tracker.start()
 
 tracker.on('peer', function (peer) {
   peers.push(peer)
-  peer.send({ username: username, color: color, state: state })
+  peer.send({ username: username, color: color, state: board.currentCanvas().state })
   peer.on('message', onMessage.bind(undefined, peer))
 
   function onClose () {
@@ -284,7 +226,7 @@ function onMessage (peer, data) {
   if (data.state) {
     Object.keys(data.state)
       .filter(function (id) {
-        return !state[id]
+        return !board.currentCanvas()[id]
       })
       .forEach(function (id) {
         state[id] = data.state[id]
@@ -293,13 +235,13 @@ function onMessage (peer, data) {
   }
 
   if (data.pt) {
-    if (!state[data.i]) state[data.i] = { pts: [], color: data.color }
-    state[data.i].pts.push(data.pt)
+    if (!board.currentCanvas().state[data.i]) board.currentCanvas().state[data.i] = { pts: [], color: data.color }
+    board.currentCanvas().state[data.i].pts.push(data.pt)
     redraw()
   }
 
   if (data.infoHash) {
-    state[data.infoHash] = data
+    board.currentCanvas().state[data.infoHash] = data
     redraw()
   }
 }
@@ -313,7 +255,7 @@ dragDrop('body', function (files, pos) {
         pos: pos
       }
       broadcast(message)
-      state[torrent.infoHash] = message
+      board.currentCanvas().state[torrent.infoHash] = message
 
       var videoStream = new stream.PassThrough()
       videoStream.end(files[0].buffer)
@@ -340,7 +282,7 @@ dragDrop('body', function (files, pos) {
         localStorage.setItem('slide1', JSON.stringify(slide1));
 
         broadcast(message)
-        state[torrent.infoHash] = message
+        board.currentCanvas().state[torrent.infoHash] = message
         torrentData[torrent.infoHash] = { complete: true, img: img }
         redraw()
       })
@@ -356,46 +298,6 @@ function bufToImage (buf, cb) {
   img.onload = function () {
     cb(img)
   }
-}
-
-function pipeToVideo (stream, video) {
-  window.video = video
-  var MediaSource_ = window.MediaSource || window.WebKitMediaSource
-
-  var mediaSource = new MediaSource_()
-  var url = window.URL.createObjectURL(mediaSource)
-
-  video.src = url
-
-  var sourceopen = once(function () {
-    var sourceBuffer = mediaSource.addSourceBuffer('video/webm; codecs="vorbis,vp8"')
-
-    var chunks = []
-    stream.pipe(through(function (buf) {
-      chunks.push(buf)
-      flow()
-    }))
-
-    var play = once(function () {
-      video.play()
-    })
-
-    function flow () {
-      if (sourceBuffer.updating) return
-      play()
-      var buf = chunks.shift()
-      if (buf) sourceBuffer.appendBuffer(buf)
-    }
-
-    sourceBuffer.addEventListener('updateend', flow)
-
-    stream.on('end', function () {
-      mediaSource.endOfStream()
-    })
-  })
-
-  mediaSource.addEventListener('webkitsourceopen', sourceopen, false)
-  mediaSource.addEventListener('sourceopen', sourceopen, false)
 }
 
 var ua = navigator.userAgent.toLowerCase()
