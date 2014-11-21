@@ -9,6 +9,11 @@ function Board () {
 }
 
 Board.prototype.addCanvas = function(canvas, cb) {
+  if (canvas === null) {
+    var boardSize = localStorage.getItem('boardSize')
+    var canvas = new Canvas('canvas'+boardSize)
+    this.currentCanvasNum = boardSize-1;
+  }
   this.canvases.push(canvas);
   if (cb !== undefined) cb(canvas.state)
   localStorage.setItem('boardSize', this.canvases.length);
@@ -19,7 +24,6 @@ Board.prototype.loadBoard = function(cb) {
   var boardSize = localStorage.getItem('boardSize');
   this.currentCanvasNum = 0;
   if (boardSize > 0) {
-    console.log("from ls");
     this.loadCanvases(boardSize, cb)
   } else {
     var canvas = new Canvas('canvas0');
@@ -44,6 +48,15 @@ Board.prototype.nextCanvas = function(cb) {
     this.currentCanvasNum = 0;
   } else {
     this.currentCanvasNum++;
+  }
+  cb();
+}
+
+Board.prototype.previousCanvas = function(cb) {
+  if (this.currentCanvasNum === 0) {
+    this.currentCanvasNum = this.canvases.length-1
+  } else {
+    this.currentCanvasNum--;
   }
   cb();
 }

@@ -24,17 +24,36 @@ var peers = []
 var peerId = new Buffer(hat(160), 'hex')
 
 var torrentData = {}
-// var client = new Client({ peerId: peerId })
+var client = new Client({ peerId: peerId })
 
 // create canvas
 var canvas = document.createElement('canvas')
 var ctx = canvas.getContext('2d')
 document.body.appendChild(canvas)
 
+// setup button listeners
+document.getElementById('new-canvas').addEventListener('click', function(e) {
+  console.log("new canvas");
+  board.addCanvas(null, redraw);
+});
+
+document.getElementById('next').addEventListener('click', function(e) {
+  console.log("next canvas");
+  board.nextCanvas(redraw);
+})
+
+document.getElementById('prev').addEventListener('click', function(e) {
+  console.log("next canvas");
+  board.previousCanvas(redraw);
+})
+
 // set canvas settings and size
 setupCanvas()
 board.loadBoard(redraw);
-window.addEventListener('resize', setupCanvas)
+window.addEventListener('resize', function() {
+  setupCanvas()
+  redraw()
+});
 
 function setupCanvas () {
   // calculate scale factor for retina displays
@@ -64,11 +83,12 @@ function setupCanvas () {
 }
 
 function redraw () {
+  console.log("redrawing");
   var state = board.currentCanvas().state
   // clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  // Draw images from localStorage
+  // Draw images from state
   if (state.images) {
     Object.keys(state['images']).forEach(function(hashId) {
       var imgData = state['images'][hashId]
@@ -83,7 +103,6 @@ function redraw () {
     })
   }
 
-  console.log("redrawing");
   // draw the current canvas state
   Object.keys(state)
     .filter(function(key) {
@@ -149,10 +168,6 @@ function onDown (e) {
     board.currentCanvas().state[currentPathId] = { color: color, pts: [ p1, p2 ] }
     board.currentCanvas().saveState();
 
-    // var slide1 = JSON.parse(localStorage.getItem('slide1'));
-    // slide1[currentPathId] = { color: color, pts: [ p1, p2 ] };
-    // localStorage.setItem('slide1', JSON.stringify(slide1));
-
     broadcast({ i: currentPathId, pt: p1, color: color })
     broadcast({ i: currentPathId, pt: p2 })
     redraw()
@@ -182,10 +197,6 @@ function onMove (e) {
     if (currentPathId) {
       console.log(currentPathId);
       var pt = { x: x, y: y }
-
-      // var slide1 = JSON.parse(localStorage.getItem('slide1'));
-      // slide1[currentPathId].pts.push(pt)
-      // localStorage.setItem('slide1', JSON.stringify(slide1));
 
       board.currentCanvas().state[currentPathId].pts.push(pt)
       board.currentCanvas().saveState();
@@ -275,14 +286,10 @@ dragDrop('body', function (files, pos) {
           height: img.height
         }
 
-        var slide1 = JSON.parse(localStorage.getItem('slide1'));
-        if (!slide1['images']) slide1['images'] = {};
-        message['buffer'] = files[0].buffer;
-        slide1['images'][torrent.infoHash] = message
-        localStorage.setItem('slide1', JSON.stringify(slide1));
-
         broadcast(message)
-        board.currentCanvas().state[torrent.infoHash] = message
+        message['buffer'] = files[0].buffer;
+        board.currentCanvas().state['images'][torrent.infoHash] = message
+        board.currentCanvas().saveState();
         torrentData[torrent.infoHash] = { complete: true, img: img }
         redraw()
       })

@@ -36,6 +36,7 @@ body {
   margin: 0px;
   height: 100%;
   overflow: hidden;
+  font: 'Arial';
 }
 
 canvas {
@@ -55,4 +56,22 @@ body:not(.android) canvas {
 
 video {
   position: absolute;
+}
+
+.buttons {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+}
+
+.button {
+  padding: 5px;
+  cursor: pointer;
+  background-color: #C22800;
+  width: 50px;
+  color: white;
+  float: left;
+  margin-right: 10px;
+  text-align: center;
 }
